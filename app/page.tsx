@@ -4,6 +4,8 @@ import { useState } from "react";
 export default function LinkShortener() {
   const [longUrl, setLongUrl] = useState("");
   const [shortUrl, setShortUrl] = useState("");
+  const [isLoading, setIsloading] = useState(false);
+  const host = window.location.origin;
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -18,15 +20,17 @@ export default function LinkShortener() {
       });
 
       const data = await response.json();
-      console.log("🚀 ~ handleSubmit ~ data:", data)
+      setIsloading(true);
       if (response.ok) {
-        setShortUrl(`${window.location.origin}/${data.shortUrl}`);
+        setShortUrl(data.shortUrl);
       } else {
         alert(data.error || "Something went wrong");
       }
     } catch (error) {
       console.error("Error:", error);
       alert("Failed to shorten URL");
+    } finally {
+      setIsloading(false);
     }
   };
 
@@ -38,12 +42,13 @@ export default function LinkShortener() {
         className="flex flex-col sm:flex-row items-center gap-4 w-full max-w-lg"
       >
         <input
-          type="text"
+          type="url"
           value={longUrl}
           onChange={(e) => setLongUrl(e.target.value)}
           placeholder="Enter long URL"
           required
-          className="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full p-3 disabled:bg-slate-500 rounded-lg bg-gray-800 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          readOnly={isLoading}
         />
         <button
           type="submit"
@@ -65,7 +70,9 @@ export default function LinkShortener() {
               {shortUrl}
             </a>
             <button
-              onClick={() => navigator.clipboard.writeText(shortUrl)}
+              onClick={() =>
+                navigator.clipboard.writeText(`${host}/${shortUrl}`)
+              }
               className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
               title="Copy URL"
             >
@@ -73,13 +80,13 @@ export default function LinkShortener() {
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
-                stroke-width="1.5"
+                strokeWidth="1.5"
                 stroke="currentColor"
                 className="w-6 h-6 text-white"
               >
                 <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   d="M8.25 15.75v1.5a2.25 2.25 0 002.25 2.25h7.5a2.25 2.25 0 002.25-2.25v-7.5a2.25 2.25 0 00-2.25-2.25h-1.5M15.75 8.25v-1.5a2.25 2.25 0 00-2.25-2.25h-7.5a2.25 2.25 0 00-2.25 2.25v7.5a2.25 2.25 0 002.25 2.25h1.5"
                 />
               </svg>
