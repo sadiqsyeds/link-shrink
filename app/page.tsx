@@ -4,11 +4,12 @@ import { useState } from "react";
 export default function LinkShortener() {
   const [longUrl, setLongUrl] = useState("");
   const [shortUrl, setShortUrl] = useState("");
-  const [isLoading, setIsloading] = useState(false);
-  const host = window.location.origin;
+  const [isLoading, setIsLoading] = useState(false);
+  const host = typeof window !== 'undefined' ? window.location.origin : '';
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
+    setIsLoading(true);
 
     try {
       const response = await fetch("/api/short", {
@@ -20,7 +21,6 @@ export default function LinkShortener() {
       });
 
       const data = await response.json();
-      setIsloading(true);
       if (response.ok) {
         setShortUrl(data.shortUrl);
       } else {
@@ -30,7 +30,7 @@ export default function LinkShortener() {
       console.error("Error:", error);
       alert("Failed to shorten URL");
     } finally {
-      setIsloading(false);
+      setIsLoading(false);
     }
   };
 
