@@ -45,7 +45,6 @@ export default function Footer() {
             GitHub
           </a>
           <span className="text-[var(--border-default)]">·</span>
-          <span>Built with Next.js &amp; ❤️</span>
         </div>
       </div>
     </footer>
