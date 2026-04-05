@@ -9,16 +9,17 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "framer-motion": "^11.18.2",
     "mysql2": "^3.11.5",
+    "nanoid": "^5.1.7",
     "next": "15.0.7",
-    "react": "19.0.0-rc-66855b96-20241106",
-    "react-dom": "19.0.0-rc-66855b96-20241106"
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@types/node": "^20.17.9",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "eslint": "^8",
     "eslint-config-next": "15.0.3",
     "postcss": "^8",
