@@ -21,15 +21,3 @@ export interface ShortenResponse {
   fullShortUrl: string;   // the full URL (e.g. "https://example.com/aB3x9kLm")
 }
 
-/** Body expected by POST /api/short */
-export interface ShortenRequest {
-  longUrl: string;
-}
-
-/** Generic API error envelope */
-export interface ApiError {
-  error: string;
-}
-
-/** Union used as a generic API response */
-export type ApiResponse<T> = T | ApiError;

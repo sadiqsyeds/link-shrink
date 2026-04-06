@@ -40,8 +40,3 @@ export function buildShortUrl(shortCode: string): string {
   return `${base}/${shortCode}`;
 }
 
-/**
- * Returns true when running in a Node.js / Edge server context
- * (i.e., not in the browser).
- */
-export const isServer = typeof window === "undefined";
