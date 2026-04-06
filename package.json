@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.10.0",
+    "@supabase/supabase-js": "^2.101.1",
     "framer-motion": "^11.18.2",
     "mysql2": "^3.11.5",
     "nanoid": "^5.1.7",

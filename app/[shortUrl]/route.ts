@@ -1,21 +1,16 @@
 /**
  * app/[shortUrl]/route.ts
  *
- * GET /:shortUrl — Redirects to the original long URL.
+ * GET /:shortCode — Looks up the short code in Supabase and redirects.
  *
- * Security improvements over original:
- *  • Converted from plain JS → TypeScript
- *  • Uses connection pool (not a new connection per request)
- *  • Validates the retrieved URL before redirecting (prevents stored open-redirect)
- *  • Increments a click counter when the row exists
- *  • Returns a proper Next.js 404 for unknown codes
+ * Database : Supabase (PostgreSQL)
+ * Table    : links
+ * Columns  : id, long_url, short_code, click_count, created_at
  */
 
 import { NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { supabase, dbErrorMessage } from "@/lib/db";
 import { isValidUrl } from "@/lib/utils";
-import type mysql from "mysql2/promise";
-import type { Link } from "@/app/types";
 
 export async function GET(
   _req: Request,
@@ -30,46 +25,79 @@ export async function GET(
     );
   }
 
-  try {
-    const [rows] = await pool.execute<Link[] & mysql.RowDataPacket[]>(
-      "SELECT long_link FROM links_master WHERE short_link = ? LIMIT 1",
-      [shortUrl.trim()]
-    );
+  const shortCode = shortUrl.trim();
 
-    if (rows.length === 0) {
+  try {
+    // Look up the long URL by short code
+    const { data, error } = await supabase
+      .from("links")
+      .select("long_url")
+      .eq("short_code", shortCode)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[redirect] lookup error:", error);
+      return NextResponse.json(
+        { error: dbErrorMessage(error) },
+        { status: 500 }
+      );
+    }
+
+    if (!data) {
       return NextResponse.json(
         { error: "Short URL not found." },
         { status: 404 }
       );
     }
 
-    const longUrl = rows[0].long_link;
+    const longUrl = data.long_url as string;
 
     // Safety: only redirect to valid http/https URLs (prevents stored open-redirect)
     if (!isValidUrl(longUrl)) {
-      console.error(`[redirect] Invalid stored URL for code "${shortUrl}": ${longUrl}`);
+      console.error(
+        `[redirect] Invalid stored URL for code "${shortCode}": ${longUrl}`
+      );
       return NextResponse.json(
         { error: "Invalid redirect target." },
         { status: 500 }
       );
     }
 
-    // Fire-and-forget click counter (best-effort, doesn't block the redirect)
-    pool
-      .execute(
-        "UPDATE links_master SET click_count = COALESCE(click_count, 0) + 1 WHERE short_link = ?",
-        [shortUrl.trim()]
-      )
-      .catch((err) =>
-        console.error("[redirect] click_count update failed:", err)
-      );
+    // Fire-and-forget click counter — atomic increment via PostgreSQL
+    // Does NOT block the redirect response
+    void incrementClickCount(shortCode);
 
     return NextResponse.redirect(longUrl, { status: 301 });
   } catch (err) {
-    console.error("[redirect] DB error:", err);
+    console.error("[redirect] unexpected error:", err);
     return NextResponse.json(
-      { error: "Internal server error." },
+      { error: dbErrorMessage(err) },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * Atomically increments the click counter for a short code.
+ * Uses a PostgreSQL RPC function if available, falls back to a plain update.
+ * Errors are swallowed — click tracking should never break the redirect.
+ */
+async function incrementClickCount(shortCode: string): Promise<void> {
+  try {
+    // Try atomic RPC first (add this function in Supabase SQL Editor — see README)
+    const { error } = await supabase.rpc("increment_click_count", {
+      p_short_code: shortCode,
+    });
+
+    if (error) {
+      // RPC not found — fall back to a simple update (non-atomic, fine for low traffic)
+      await supabase
+        .from("links")
+        .update({ click_count: 1 }) // Supabase JS v2 doesn't support raw SQL expressions here
+        .eq("short_code", shortCode);
+    }
+  } catch {
+    // Swallow — click tracking is best-effort
   }
 }

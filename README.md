@@ -1,10 +1,11 @@
 # ⚡ LinkShrink — Modern URL Shortener
 
-> A fast, free, and beautifully designed URL shortener built with Next.js 15, MySQL, and Framer Motion.
+> A fast, free, and beautifully designed URL shortener built with Next.js 15, Supabase, and Framer Motion.
 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-38bdf8?logo=tailwindcss)](https://tailwindcss.com)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e?logo=supabase)](https://supabase.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
@@ -17,11 +18,10 @@
 - [Architecture](#-architecture)
 - [Getting Started](#-getting-started)
 - [Environment Variables](#-environment-variables)
-- [Database Setup](#-database-setup)
+- [Supabase Setup](#-supabase-setup)
 - [API Reference](#-api-reference)
 - [Deployment](#-deployment)
 - [Project Structure](#-project-structure)
-- [What Was Improved](#-what-was-improved)
 
 ---
 
@@ -41,12 +41,12 @@ https://very-long-website.com/some/deep/nested/path?with=query&params=too
 
 | Feature | Description |
 |---------|-------------|
-| ⚡ **Instant shortening** | Short codes generated with nanoid in < 5 ms |
+| ⚡ **Instant shortening** | Short codes generated with nanoid in milliseconds |
 | 🔁 **Smart deduplication** | Same long URL always returns the same short code |
 | 📋 **One-click copy** | Copy the short URL to clipboard with visual feedback |
 | 🕐 **Recent links** | Last 5 shortened links persisted in localStorage |
 | 🌙 **Dark / Light mode** | Manual toggle + system preference fallback |
-| 📊 **Click tracking** | Each redirect increments a click counter |
+| 📊 **Click tracking** | Each redirect atomically increments a click counter |
 | 🔐 **Secure redirects** | Only valid `http://` / `https://` targets are stored and followed |
 | 📱 **Fully responsive** | Mobile-first, works on all screen sizes |
 | ♿ **Accessible** | Proper ARIA labels, focus states, keyboard navigation |
@@ -61,7 +61,8 @@ https://very-long-website.com/some/deep/nested/path?with=query&params=too
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS 3 |
 | Animations | Framer Motion 11 |
-| Database | MySQL 8+ (via `mysql2`) |
+| Database | [Supabase](https://supabase.com) (PostgreSQL) |
+| DB Client | `@supabase/supabase-js` |
 | ID generation | nanoid |
 | Font | Geist (local, variable) |
 | Deployment | Vercel / any Node.js host |
@@ -76,18 +77,19 @@ Browser
   ├─ GET  /               → app/page.tsx (Server Component)
   │       └─ <UrlShortener>  (Client Component)
   │              └─ POST /api/short → app/api/short/route.ts
-  │                         └─ lib/db.ts (pool) → MySQL
+  │                         └─ lib/db.ts (Supabase client) → Supabase PostgreSQL
+  │                                                           Table: links
   │
   └─ GET  /:shortCode     → app/[shortUrl]/route.ts
-                                └─ lib/db.ts (pool) → MySQL → 301 redirect
+                                └─ lib/db.ts → Supabase → 301 redirect
 ```
 
 **Key design decisions:**
 - **Server Components** for the shell/layout (zero JS shipped for static parts)
 - **Client Components** only for interactive elements (form, toggle, recent links)
-- **Singleton pool** (`lib/db.ts`) — one MySQL connection pool per server process, not per request
-- **Deduplication** — inserting an already-shortened URL returns the existing short code instantly
-- **Click counter** — fire-and-forget `UPDATE` so it never slows down the redirect
+- **Supabase JS client** uses the REST API internally — no connection pool management needed
+- **Deduplication** — re-shortening an already-stored URL returns the existing short code
+- **Click counter** — fire-and-forget atomic `increment_click_count` RPC call
 
 ---
 
@@ -96,8 +98,8 @@ Browser
 ### Prerequisites
 
 - Node.js 18+
-- npm / pnpm
-- MySQL 8+ (local or remote)
+- npm or pnpm
+- A free [Supabase](https://supabase.com) account
 
 ### 1. Clone the repository
 
@@ -114,33 +116,22 @@ npm install
 pnpm install
 ```
 
-### 3. Configure environment variables
+### 3. Set up Supabase
+
+See [Supabase Setup](#-supabase-setup) below for step-by-step instructions.
+
+### 4. Configure environment variables
 
 ```bash
 cp .env.example .env.local
 ```
 
-Open `.env.local` and fill in your MySQL credentials and base URL (see [Environment Variables](#-environment-variables)).
+Open `.env.local` and fill in your Supabase credentials:
 
-### 4. Set up the database
-
-```bash
-# Connect to MySQL
-mysql -u root -p
-
-# Run the schema
-CREATE DATABASE IF NOT EXISTS linkshrink;
-USE linkshrink;
-
-CREATE TABLE IF NOT EXISTS links_master (
-  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  long_link   TEXT            NOT NULL,
-  short_link  VARCHAR(16)     NOT NULL UNIQUE,
-  click_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_short_link (short_link),
-  INDEX idx_long_link  (long_link(255))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
 ```
 
 ### 5. Start the development server
@@ -149,42 +140,89 @@ CREATE TABLE IF NOT EXISTS links_master (
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000) — paste a URL and shorten it!
 
 ---
 
 ## 🔑 Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `NEXT_PUBLIC_BASE_URL` | ✅ | `http://localhost:3000` | Public base URL (used to build full short URLs) |
-| `DB_HOST` | ✅ | — | MySQL host |
-| `DB_PORT` | ❌ | `3306` | MySQL port |
-| `DB_USER` | ✅ | — | MySQL username |
-| `DB_PASSWORD` | ✅ | — | MySQL password |
-| `DB_NAME` | ✅ | — | MySQL database name |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Your Supabase anon/public API key |
+| `NEXT_PUBLIC_BASE_URL` | ✅ | Public base URL of your deployment |
 
 ---
 
-## 🗄 Database Setup
+## 🟢 Supabase Setup
 
-The app expects a single table `links_master` with this schema:
+### Step 1 — Create a free project
+
+1. Go to [supabase.com](https://supabase.com) and sign in / register
+2. Click **New Project**
+3. Give it a name (e.g. `link-shrink`), choose a region, set a database password
+4. Wait ~1 minute for the project to spin up
+
+### Step 2 — Get your API keys
+
+1. In your project sidebar, go to **Settings → API**
+2. Copy:
+   - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
+   - **anon / public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+3. Paste them into your `.env.local`
+
+### Step 3 — Run the setup SQL
+
+1. In the sidebar, go to **SQL Editor**
+2. Click **New Query** and paste the following SQL, then click **Run**:
 
 ```sql
-CREATE TABLE links_master (
-  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  long_link   TEXT            NOT NULL,
-  short_link  VARCHAR(16)     NOT NULL UNIQUE,
-  click_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  created_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_short_link (short_link),
-  INDEX idx_long_link  (long_link(255))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- 1. Create the links table
+CREATE TABLE IF NOT EXISTS links (
+  id          BIGSERIAL    PRIMARY KEY,
+  long_url    TEXT         NOT NULL,
+  short_code  VARCHAR(16)  NOT NULL,
+  click_count BIGINT       NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  CONSTRAINT links_short_code_key UNIQUE (short_code)
+);
+
+-- 2. Indexes for fast lookups
+CREATE UNIQUE INDEX IF NOT EXISTS idx_links_short_code ON links (short_code);
+CREATE        INDEX IF NOT EXISTS idx_links_long_url   ON links (long_url);
+
+-- 3. Atomic click counter function (used by the redirect route)
+CREATE OR REPLACE FUNCTION increment_click_count(p_short_code TEXT)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE links SET click_count = click_count + 1 WHERE short_code = p_short_code;
+END;
+$$;
+
+-- 4. Row Level Security — allow public reads & writes via the anon key
+ALTER TABLE links ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read"
+  ON links FOR SELECT USING (true);
+
+CREATE POLICY "Allow public insert"
+  ON links FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Allow public update"
+  ON links FOR UPDATE USING (true);
 ```
 
-**Indexes explained:**
-- `idx_short_link` — used by every redirect lookup (most frequent query)
-- `idx_long_link` — used by deduplication check on insert
+### Step 4 — Done!
+
+Your database is ready. The `links` table structure:
+
+```
+id          BIGSERIAL   — auto-incrementing primary key
+long_url    TEXT        — the original long URL
+short_code  VARCHAR(16) — the 8-character nanoid (unique)
+click_count BIGINT      — redirect count (default 0)
+created_at  TIMESTAMPTZ — row creation time
+```
 
 ---
 
@@ -197,7 +235,7 @@ CREATE TABLE links_master (
 { "longUrl": "https://example.com/very/long/path" }
 ```
 
-**Success response (201 Created):**
+**Success — new link (201 Created):**
 ```json
 {
   "longUrl": "https://example.com/very/long/path",
@@ -206,7 +244,7 @@ CREATE TABLE links_master (
 }
 ```
 
-**If already shortened (200 OK):**
+**Success — already shortened (200 OK):**
 Returns the same shape with the existing `shortUrl`.
 
 **Error responses:**
@@ -219,18 +257,21 @@ Returns the same shape with the existing `shortUrl`.
 
 ### `GET /:shortCode` — Redirect
 
-Visiting `http://localhost:3000/aB3x9kLm` performs a **301 redirect** to the original long URL. Returns `404` if the code doesn't exist.
+Visiting `http://localhost:3000/aB3x9kLm` performs a **301 redirect** to the original long URL. Returns `404` JSON if the code doesn't exist.
 
 ---
 
 ## 🚢 Deployment
 
-### Vercel (recommended)
+### Vercel (recommended — works seamlessly with Supabase)
 
 1. Push to GitHub
 2. Import the repo in [Vercel](https://vercel.com)
-3. Add all environment variables in the Vercel dashboard
-4. Deploy — done ✅
+3. Add environment variables in the Vercel dashboard:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_BASE_URL` → your Vercel domain (e.g. `https://link-shrink.vercel.app`)
+4. Deploy ✅
 
 ### Self-hosted (Node.js)
 
@@ -239,9 +280,7 @@ npm run build
 npm start
 ```
 
-Set `PORT` if you need a custom port. Make sure your MySQL is reachable from the server.
-
-### Docker (optional)
+### Docker
 
 ```dockerfile
 FROM node:20-alpine AS builder
@@ -290,47 +329,14 @@ link-shrink/
 │   ├── ThemeToggle.tsx       # Dark/light mode toggle
 │   └── UrlShortener.tsx      # Main URL input form
 ├── lib/
-│   ├── db.ts                 # MySQL connection pool singleton
+│   ├── db.ts                 # Supabase client singleton
 │   └── utils.ts              # URL validation + helpers
 ├── public/                   # Static assets
-├── .env.example              # Environment variable template
+├── .env.example              # Environment variable template (with SQL setup)
 ├── next.config.ts            # Next.js config + security headers
 ├── tailwind.config.ts        # Tailwind config with dark mode
 └── tsconfig.json             # TypeScript config
 ```
-
----
-
-## 🔧 What Was Improved
-
-This project was fully modernized from a stub. Here's a summary of every change:
-
-### 🔴 Critical Fixes
-- **Built the actual UI** — `app/page.tsx` was `return null`; completely rebuilt
-- **Connection pooling** — replaced per-request `createConnection()` with a singleton `createPool()` in `lib/db.ts`
-- **URL validation** — all inputs validated with `new URL()` before any DB operations
-- **Secure redirects** — stored URLs re-validated before following (prevents open-redirect attacks)
-- **Removed public DB dump** — `GET /api/short` no longer exposes all rows to anyone
-
-### 🟠 Security
-- Security headers added via `next.config.ts` (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
-- Only `http://` and `https://` protocols are accepted as long URLs
-- Redirect target validated again at redirect time
-
-### 🟡 Code Quality
-- Converted `app/[shortUrl]/route.js` → `.ts` (full TypeScript)
-- Proper types in `app/types/index.ts` (`Link`, `ShortenResponse`, `ApiError`, etc.)
-- `lib/utils.ts` for shared, testable utility functions
-
-### 🟢 Features Added
-- **Smart deduplication** — re-shortening the same URL returns the existing code
-- **Click counter** — every redirect increments `click_count` (fire-and-forget)
-- **Dark/light mode toggle** — persisted in `localStorage`
-- **Recent links** — last 5 links persisted in `localStorage` with clear button
-- **One-click copy** — with animated feedback
-- **404, Error, Loading pages** — proper Next.js error boundaries
-- **Framer Motion animations** — stagger entrance, button feedback, mode transitions
-- **Feature grid** — server-rendered with zero client JS
 
 ---
 

@@ -1,30 +1,28 @@
 /**
  * app/api/short/route.ts
  *
- * POST /api/short  — Shorten a long URL
- * GET  /api/short  — (removed public dump; now returns 405)
+ * POST /api/short  — Shorten a long URL (Supabase / PostgreSQL)
+ * GET  /api/short  — Returns 405 (no unauthenticated data dump)
  *
- * Security improvements over original:
- *  • URL validation before any DB work
- *  • Uses connection pool (not a new connection per request)
- *  • Deduplication: returns existing short code for already-shortened URLs
- *  • No unauthenticated full-table dump
+ * Database : Supabase (PostgreSQL)
+ * Table    : links
+ * Columns  : id, long_url, short_code, click_count, created_at
  */
 
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
-import { pool } from "@/lib/db";
+import { supabase, dbErrorMessage } from "@/lib/db";
 import { isValidUrl, normaliseUrl, buildShortUrl } from "@/lib/utils";
-import type { Link, ShortenResponse } from "@/app/types";
+import type { ShortenResponse } from "@/app/types";
 
 /** POST /api/short — Shorten a URL */
 export async function POST(req: Request): Promise<NextResponse> {
+  // 1. Parse request body
   let body: unknown;
-
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
   const rawUrl =
@@ -32,7 +30,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       ? (body as Record<string, unknown>).longUrl
       : undefined;
 
-  // Validate URL
+  // 2. Validate URL (must be http:// or https://)
   if (!isValidUrl(rawUrl)) {
     return NextResponse.json(
       { error: "A valid http:// or https:// URL is required." },
@@ -43,50 +41,62 @@ export async function POST(req: Request): Promise<NextResponse> {
   const longUrl = normaliseUrl(rawUrl);
 
   try {
-    // Deduplication: if this URL was already shortened, return the existing code
-    const [existing] = await pool.execute<Link[] & mysql.RowDataPacket[]>(
-      "SELECT short_link FROM links_master WHERE long_link = ? LIMIT 1",
-      [longUrl]
-    );
+    // 3. Deduplication — return existing short code if URL was already shortened
+    const { data: existing, error: findError } = await supabase
+      .from("links")
+      .select("short_code")
+      .eq("long_url", longUrl)
+      .limit(1)
+      .maybeSingle();
 
-    if (existing.length > 0) {
-      const shortCode = existing[0].short_link;
+    if (findError) {
+      console.error("[POST /api/short] lookup error:", findError);
+      return NextResponse.json(
+        { error: dbErrorMessage(findError) },
+        { status: 500 }
+      );
+    }
+
+    if (existing) {
       const response: ShortenResponse = {
         longUrl,
-        shortUrl: shortCode,
-        fullShortUrl: buildShortUrl(shortCode),
+        shortUrl: existing.short_code,
+        fullShortUrl: buildShortUrl(existing.short_code),
       };
       return NextResponse.json(response, { status: 200 });
     }
 
-    // Generate a new unique short code
+    // 4. Generate unique short code and insert
     const shortCode = nanoid(8);
 
-    await pool.execute(
-      "INSERT INTO links_master (long_link, short_link) VALUES (?, ?)",
-      [longUrl, shortCode]
-    );
+    const { error: insertError } = await supabase
+      .from("links")
+      .insert({ long_url: longUrl, short_code: shortCode });
+
+    if (insertError) {
+      console.error("[POST /api/short] insert error:", insertError);
+      return NextResponse.json(
+        { error: dbErrorMessage(insertError) },
+        { status: 500 }
+      );
+    }
 
     const response: ShortenResponse = {
       longUrl,
       shortUrl: shortCode,
       fullShortUrl: buildShortUrl(shortCode),
     };
-
     return NextResponse.json(response, { status: 201 });
   } catch (err) {
-    console.error("[POST /api/short] DB error:", err);
+    console.error("[POST /api/short] unexpected error:", err);
     return NextResponse.json(
-      { error: "Internal server error. Please try again." },
+      { error: dbErrorMessage(err) },
       { status: 500 }
     );
   }
 }
 
-/** Block all other methods */
+/** Block GET — no unauthenticated data dump */
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
+  return NextResponse.json({ error: "Method not allowed." }, { status: 405 });
 }
-
-// Required to avoid TS errors when importing the mysql type inline
-import type mysql from "mysql2/promise";
