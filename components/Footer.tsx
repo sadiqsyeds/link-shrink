@@ -22,7 +22,7 @@ export default function Footer() {
             </svg>
           </div>
           <span className="text-xs text-[var(--text-muted)]">
-            © {year} LinkShrink. Free &amp; open-source.
+            © {year} LinkShrink. All rights reserved.
           </span>
         </div>
 

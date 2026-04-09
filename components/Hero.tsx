@@ -22,13 +22,7 @@ export default function Hero() {
       animate="show"
       className="text-center"
     >
-      {/* Badge */}
-      <motion.div variants={itemVariants} className="inline-flex mb-6">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/60">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-          Free &amp; open-source URL shortener
-        </span>
-      </motion.div>
+      
 
       {/* Headline */}
       <motion.h1
