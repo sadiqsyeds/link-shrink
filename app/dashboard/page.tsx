@@ -5,6 +5,7 @@ import { supabase } from "@/lib/db";
 import Link from "next/link";
 import DashboardClient from "./DashboardClient";
 import SignOutButton from "./SignOutButton";
+import ThemeToggle from "@/components/ThemeToggle";
 import type { LinkRow } from "@/app/types";
 
 export const metadata = { title: "Dashboard" };
@@ -42,6 +43,7 @@ export default async function DashboardPage() {
             </Link>
             <div className="flex items-center gap-3">
               <span className="text-xs text-[var(--text-muted)] hidden sm:block">{user.email}</span>
+              <ThemeToggle />
               <SignOutButton />
             </div>
           </div>

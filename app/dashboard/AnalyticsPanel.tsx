@@ -1,217 +1,281 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, BarChart, Bar,
-} from "recharts";
-import type { LinkRow, AnalyticsSummary } from "@/app/types";
+import { useCallback, useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import type { LinkRow, AnalyticsSummary, AnalyticsGranularity } from "@/app/types";
+import { buildShortUrl } from "@/lib/utils";
 
-const COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#22c55e", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6"];
+import StatCard from "@/components/analytics/StatCard";
+import ChartContainer from "@/components/analytics/ChartContainer";
+import GeoList from "@/components/analytics/GeoList";
+import DeviceBreakdown from "@/components/analytics/DeviceBreakdown";
+import ReferrerList from "@/components/analytics/ReferrerList";
+import LiveActivity from "@/components/analytics/LiveActivity";
+import AnalyticsSkeleton from "@/components/analytics/AnalyticsSkeleton";
+import EmptyState from "@/components/analytics/EmptyState";
 
 interface Props {
   link: LinkRow;
   onClose: () => void;
 }
 
+/* ── KPI helpers ─────────────────────────────────────────────────────────── */
+
+/** Clicks recorded today (UTC day) */
+function clicksToday(data: AnalyticsSummary): number {
+  const todayPrefix = new Date().toISOString().slice(0, 10);
+  return data.clicks_over_time
+    .filter((b) => b.bucket.startsWith(todayPrefix))
+    .reduce((s, b) => s + b.total_clicks, 0);
+}
+
+/** Clicks recorded yesterday (UTC day) */
+function clicksYesterday(data: AnalyticsSummary): number {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - 1);
+  const prefix = d.toISOString().slice(0, 10);
+  return data.clicks_over_time
+    .filter((b) => b.bucket.startsWith(prefix))
+    .reduce((s, b) => s + b.total_clicks, 0);
+}
+
+/** Growth % (today vs yesterday). Returns null when there's no yesterday data. */
+function growthPct(today: number, yesterday: number): number | null {
+  if (yesterday === 0) return today > 0 ? 100 : null;
+  return Math.round(((today - yesterday) / yesterday) * 100);
+}
+
+/* ── Icons (inline SVG — no icon lib) ────────────────────────────────────── */
+
+const IconClicks = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+  </svg>
+);
+const IconUnique = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+const IconToday = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
+const IconGrowth = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+    <polyline points="17 6 23 6 23 12" />
+  </svg>
+);
+
+/* ── Main component ──────────────────────────────────────────────────────── */
+
 export default function AnalyticsPanel({ link, onClose }: Props) {
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [granularity, setGranularity] = useState<AnalyticsGranularity>("day");
+  const [copied, setCopied] = useState(false);
+
+  const fetchData = useCallback(
+    async (gran: AnalyticsGranularity) => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/analytics/${link.id}?granularity=${gran}`);
+        const json = await res.json();
+        if (json.error) setError(json.error);
+        else setData(json as AnalyticsSummary);
+      } catch {
+        setError("Failed to load analytics.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [link.id]
+  );
 
   useEffect(() => {
-    setLoading(true);
-    setError("");
-    fetch(`/api/analytics/${link.id}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setError(d.error);
-        else setData(d as AnalyticsSummary);
-      })
-      .catch(() => setError("Failed to load analytics."))
-      .finally(() => setLoading(false));
-  }, [link.id]);
+    fetchData(granularity);
+  }, [fetchData, granularity]);
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(buildShortUrl(link.short_code)).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function handleGranularityChange(g: AnalyticsGranularity) {
+    setGranularity(g);
+  }
+
+  /* ─── Derived KPI values ─── */
+  const today = data ? clicksToday(data) : 0;
+  const yesterday = data ? clicksYesterday(data) : 0;
+  const growth = data ? growthPct(today, yesterday) : null;
 
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)]">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Analytics</h2>
-          <p className="text-xs text-[var(--text-muted)] truncate">{link.long_url}</p>
+      {/* ── Panel Header ── */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-default)] bg-[var(--bg-subtle)]">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Analytics</h2>
+            {data?.cached && (
+              <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 font-medium">cached</span>
+            )}
+          </div>
+          <p className="text-xs text-[var(--text-muted)] truncate mt-0.5">{link.long_url}</p>
         </div>
-        <button
-          onClick={onClose}
-          className="flex-shrink-0 ml-3 p-1.5 rounded-lg bg-[var(--bg-raised)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          aria-label="Close analytics"
-        >
-          <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="2" y1="2" x2="10" y2="10" /><line x1="10" y1="2" x2="2" y2="10" />
-          </svg>
-        </button>
-      </div>
 
-      {/* Body */}
-      <div className="p-5">
-        {loading && (
-          <div className="flex items-center justify-center py-16">
-            <svg className="animate-spin text-blue-500" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        {/* Header actions */}
+        <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+          {/* Copy link */}
+          <button
+            onClick={handleCopy}
+            aria-label="Copy short URL"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              copied
+                ? "bg-emerald-500 text-white"
+                : "bg-[var(--bg-raised)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {copied ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="2 6 5 9 10 3" /></svg>
+                Copied
+              </>
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                Copy
+              </>
+            )}
+          </button>
+
+          {/* Close */}
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg bg-[var(--bg-raised)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            aria-label="Close analytics"
+          >
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="2" y1="2" x2="10" y2="10" /><line x1="10" y1="2" x2="2" y2="10" />
             </svg>
-          </div>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Body ── */}
+      <div className="p-5">
+        {/* Loading skeleton */}
+        {loading && <AnalyticsSkeleton />}
+
+        {/* Error state */}
+        {!loading && error && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="py-12 text-center"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 flex items-center justify-center mx-auto mb-3">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-500">
+                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-[var(--text-primary)]">Failed to load</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1">{error}</p>
+            <button
+              onClick={() => fetchData(granularity)}
+              className="mt-4 px-4 py-2 rounded-xl bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 transition-colors"
+            >
+              Retry
+            </button>
+          </motion.div>
         )}
 
-        {error && (
-          <div className="py-8 text-center text-sm text-red-500">{error}</div>
-        )}
-
+        {/* Data loaded */}
         {!loading && !error && data && (
-          <div className="space-y-8">
-            {/* KPI cards */}
-            <div className="grid grid-cols-2 gap-4">
-              <KpiCard label="Total Clicks" value={data.total_clicks} color="blue" />
-              <KpiCard label="Unique Visitors" value={data.unique_clicks} color="violet" />
+          <div className="space-y-5">
+
+            {/* ── 1. KPI Row ── */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatCard
+                label="Total Clicks"
+                value={data.total_clicks}
+                icon={<IconClicks />}
+                color="blue"
+                delay={0}
+              />
+              <StatCard
+                label="Unique Visitors"
+                value={data.unique_clicks}
+                icon={<IconUnique />}
+                color="violet"
+                delay={0.07}
+              />
+              <StatCard
+                label="Clicks Today"
+                value={today}
+                icon={<IconToday />}
+                color="cyan"
+                delay={0.14}
+              />
+              <StatCard
+                label="vs Yesterday"
+                value={growth !== null ? `${growth > 0 ? "+" : ""}${growth}%` : "—"}
+                icon={<IconGrowth />}
+                color={growth !== null && growth >= 0 ? "emerald" : "rose"}
+                trend={
+                  growth !== null
+                    ? { value: growth, label: `${yesterday} clicks yesterday` }
+                    : null
+                }
+                delay={0.21}
+              />
             </div>
 
-            {/* Clicks over time */}
-            {data.clicks_over_time.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Clicks over time (30d)</h3>
-                <ResponsiveContainer width="100%" height={180}>
-                  <LineChart data={data.clicks_over_time} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-muted)" }} tickFormatter={(v) => v.slice(5)} />
-                    <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ background: "var(--bg-raised)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }}
-                      labelStyle={{ color: "var(--text-primary)" }}
-                    />
-                    <Line type="monotone" dataKey="clicks" stroke="#3b82f6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </section>
-            )}
-
-            {/* Device + Browser row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {data.device_breakdown.length > 0 && (
-                <section>
-                  <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Devices</h3>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <PieChart>
-                      <Pie data={data.device_breakdown} dataKey="clicks" nameKey="device" cx="50%" cy="50%" outerRadius={60} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} labelLine={false}>
-                        {data.device_breakdown.map((_, i) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip contentStyle={{ background: "var(--bg-raised)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </section>
-              )}
-
-              {data.browser_breakdown.length > 0 && (
-                <section>
-                  <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Browsers</h3>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <BarChart data={data.browser_breakdown.slice(0, 6)} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                      <XAxis dataKey="browser" tick={{ fontSize: 10, fill: "var(--text-muted)" }} />
-                      <YAxis tick={{ fontSize: 10, fill: "var(--text-muted)" }} allowDecimals={false} />
-                      <Tooltip contentStyle={{ background: "var(--bg-raised)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }} />
-                      <Bar dataKey="clicks" radius={[4, 4, 0, 0]}>
-                        {data.browser_breakdown.slice(0, 6).map((_, i) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </section>
-              )}
-            </div>
-
-            {/* Top countries */}
-            {data.top_countries.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Top Countries</h3>
-                <div className="space-y-2">
-                  {data.top_countries.slice(0, 8).map((c, i) => {
-                    const max = data.top_countries[0].clicks;
-                    return (
-                      <div key={i} className="flex items-center gap-3">
-                        <span className="text-xs text-[var(--text-muted)] w-24 truncate">{c.country || "Unknown"}</span>
-                        <div className="flex-1 bg-[var(--bg-raised)] rounded-full h-1.5 overflow-hidden">
-                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(c.clicks / max) * 100}%` }} />
-                        </div>
-                        <span className="text-xs font-semibold text-[var(--text-primary)] w-8 text-right">{c.clicks}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* Top referrers */}
-            {data.top_referrers.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Top Referrers</h3>
-                <div className="space-y-2">
-                  {data.top_referrers.slice(0, 6).map((r, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-[var(--text-muted)] truncate flex-1">{r.referrer || "Direct"}</span>
-                      <span className="font-semibold text-[var(--text-primary)] flex-shrink-0">{r.clicks}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Recent clicks */}
-            {data.recent_clicks.length > 0 && (
-              <section>
-                <h3 className="text-xs font-semibold text-[var(--text-secondary)] mb-3 uppercase tracking-wide">Recent Clicks</h3>
-                <div className="overflow-x-auto rounded-xl border border-[var(--border-default)]">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-[var(--bg-subtle)] border-b border-[var(--border-default)]">
-                        {["Time", "Country", "Device", "Browser", "OS"].map((h) => (
-                          <th key={h} className="px-3 py-2 text-left font-semibold text-[var(--text-secondary)]">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--border-default)]">
-                      {data.recent_clicks.map((c) => (
-                        <tr key={c.id} className="hover:bg-[var(--bg-subtle)] transition-colors">
-                          <td className="px-3 py-2 text-[var(--text-muted)]">{new Date(c.created_at).toLocaleString()}</td>
-                          <td className="px-3 py-2 text-[var(--text-primary)]">{c.country || "—"}</td>
-                          <td className="px-3 py-2 text-[var(--text-primary)]">{c.device || "—"}</td>
-                          <td className="px-3 py-2 text-[var(--text-primary)]">{c.browser || "—"}</td>
-                          <td className="px-3 py-2 text-[var(--text-primary)]">{c.os || "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
+            {/* ── Empty state (no clicks at all) ── */}
             {data.total_clicks === 0 && (
-              <p className="text-center text-sm text-[var(--text-muted)] py-6">No clicks recorded yet. Share your link to start tracking!</p>
+              <EmptyState shortCode={link.short_code} />
+            )}
+
+            {/* ── Content shown only when there are clicks ── */}
+            {data.total_clicks > 0 && (
+              <>
+                {/* ── 2. Time-series chart ── */}
+                <ChartContainer
+                  data={data}
+                  granularity={granularity}
+                  onGranularityChange={handleGranularityChange}
+                />
+
+                {/* ── 3. Geo + Devices row ── */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <GeoList countries={data.top_countries} />
+                  <DeviceBreakdown
+                    devices={data.device_breakdown}
+                    browsers={data.browser_breakdown}
+                  />
+                </div>
+
+                {/* ── 4. Referrers + Live Activity row ── */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <ReferrerList referrers={data.top_referrers} />
+                  <LiveActivity linkId={link.id} initialClicks={data.recent_clicks} />
+                </div>
+              </>
             )}
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function KpiCard({ label, value, color }: { label: string; value: number; color: "blue" | "violet" }) {
-  const gradient = color === "blue"
-    ? "from-blue-500/10 to-blue-500/5 border-blue-500/20"
-    : "from-violet-500/10 to-violet-500/5 border-violet-500/20";
-  const text = color === "blue" ? "text-blue-500" : "text-violet-500";
-  return (
-    <div className={`rounded-2xl p-5 bg-gradient-to-br border ${gradient}`}>
-      <p className={`text-2xl font-bold ${text}`}>{value.toLocaleString()}</p>
-      <p className="text-xs text-[var(--text-muted)] mt-1">{label}</p>
     </div>
   );
 }
