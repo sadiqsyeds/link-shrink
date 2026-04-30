@@ -268,6 +268,7 @@ function ActionBar({
 }) {
   const twitterUrl = `https://twitter.com/intent/tweet?url=${encodeURIComponent(result.fullShortUrl)}&text=${encodeURIComponent("Check out this link!")}`;
   const linkedinUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(result.fullShortUrl)}`;
+  const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(result.fullShortUrl)}`;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -307,6 +308,18 @@ function ActionBar({
       >
         <LinkedInIcon />
         LinkedIn
+      </a>
+
+      {/* Facebook share */}
+      <a
+        href={facebookUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Share on Facebook"
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-raised)] text-[var(--text-primary)] hover:bg-[#1877f2] hover:text-white transition-all duration-200"
+      >
+        <FacebookIcon />
+        Facebook
       </a>
 
       {/* Native share / copy fallback */}
@@ -377,6 +390,14 @@ function ShareIcon() {
       <circle cx="18" cy="19" r="3" />
       <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
       <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+    </svg>
+  );
+}
+
+function FacebookIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.97h-1.513c-1.491 0-1.956.93-1.956 1.884v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z" />
     </svg>
   );
 }

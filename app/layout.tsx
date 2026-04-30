@@ -86,8 +86,31 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       {/*
         suppressHydrationWarning is required because ThemeToggle adds/removes
-        the "dark" class on <html> client-side to avoid a flash of wrong theme.
+        the "dark" / "light" class on <html> client-side.
+        The inline script below runs synchronously before first paint to avoid
+        a flash of the wrong theme (FOUC).
       */}
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+(function() {
+  try {
+    var stored = localStorage.getItem('theme');
+    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (stored === 'dark' || (!stored && prefersDark)) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    }
+  } catch(e) {}
+})();
+`,
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

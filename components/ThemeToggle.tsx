@@ -14,9 +14,11 @@ export default function ThemeToggle() {
     if (stored === "dark") {
       setDark(true);
       document.documentElement.classList.add("dark");
+      document.documentElement.classList.remove("light");
     } else if (stored === "light") {
       setDark(false);
       document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("light");
     } else {
       // Default to system preference
       const prefersDark = window.matchMedia(
@@ -24,13 +26,20 @@ export default function ThemeToggle() {
       ).matches;
       setDark(prefersDark);
       document.documentElement.classList.toggle("dark", prefersDark);
+      document.documentElement.classList.toggle("light", !prefersDark);
     }
   }, []);
 
   function toggle() {
     const next = !dark;
     setDark(next);
-    document.documentElement.classList.toggle("dark", next);
+    if (next) {
+      document.documentElement.classList.add("dark");
+      document.documentElement.classList.remove("light");
+    } else {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("light");
+    }
     localStorage.setItem("theme", next ? "dark" : "light");
   }
 
