@@ -99,6 +99,33 @@ export default function UrlShortener() {
                 className="flex-1 bg-transparent py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none disabled:opacity-50"
               />
               <AnimatePresence>
+                {!url && !isLoading && (
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    transition={{ duration: 0.15 }}
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const text = await navigator.clipboard.readText();
+                        if (text) { setUrl(text); inputRef.current?.focus(); }
+                      } catch {
+                        inputRef.current?.focus();
+                      }
+                    }}
+                    aria-label="Paste URL from clipboard"
+                    title="Paste from clipboard"
+                    className="flex-shrink-0 w-7 h-7 rounded-lg bg-[var(--bg-raised)] flex items-center justify-center text-[var(--text-muted)] hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                    </svg>
+                  </motion.button>
+                )}
+              </AnimatePresence>
+              <AnimatePresence>
                 {url && !isLoading && (
                   <motion.button
                     initial={{ opacity: 0, scale: 0.5 }}

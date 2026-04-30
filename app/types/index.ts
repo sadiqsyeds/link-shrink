@@ -50,14 +50,24 @@ export interface TrackPayload {
   city?: string;
 }
 
+/** Granularity for time-series analytics */
+export type AnalyticsGranularity = "hour" | "day";
+
+/** Referrer category after classification */
+export type ReferrerCategory = "search" | "social" | "direct" | "other";
+
 /** Analytics summary returned by /api/analytics/[linkId] */
 export interface AnalyticsSummary {
   total_clicks: number;
   unique_clicks: number;
-  clicks_over_time: { day: string; clicks: number }[];
+  /** Time-series buckets; key is ISO date string (day) or ISO hour string */
+  clicks_over_time: { bucket: string; total_clicks: number; unique_clicks: number }[];
+  granularity: AnalyticsGranularity;
   top_countries: { country: string; clicks: number }[];
-  top_referrers: { referrer: string; clicks: number }[];
+  top_referrers: { referrer: string; clicks: number; category: ReferrerCategory }[];
   device_breakdown: { device: string; clicks: number }[];
   browser_breakdown: { browser: string; clicks: number }[];
   recent_clicks: ClickRow[];
+  /** Served from cache if true */
+  cached?: boolean;
 }
