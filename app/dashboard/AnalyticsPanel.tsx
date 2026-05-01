@@ -5,11 +5,17 @@ import { motion } from "framer-motion";
 import type { LinkRow, AnalyticsSummary, AnalyticsGranularity } from "@/app/types";
 import { buildShortUrl } from "@/lib/utils";
 
+// New chart components
+import LineTrendChart from "@/components/analytics/LineTrendChart";
+import HourlyBarChart from "@/components/analytics/HourlyBarChart";
+import CountryBarChart from "@/components/analytics/CountryBarChart";
+import DevicePieChart from "@/components/analytics/DevicePieChart";
+import ReferrerPieChart from "@/components/analytics/ReferrerPieChart";
+import BrowserBarChart from "@/components/analytics/BrowserBarChart";
+import ClickVelocityChart from "@/components/analytics/ClickVelocityChart";
+
+// Utility components (unchanged)
 import StatCard from "@/components/analytics/StatCard";
-import ChartContainer from "@/components/analytics/ChartContainer";
-import GeoList from "@/components/analytics/GeoList";
-import DeviceBreakdown from "@/components/analytics/DeviceBreakdown";
-import ReferrerList from "@/components/analytics/ReferrerList";
 import LiveActivity from "@/components/analytics/LiveActivity";
 import AnalyticsSkeleton from "@/components/analytics/AnalyticsSkeleton";
 import EmptyState from "@/components/analytics/EmptyState";
@@ -21,7 +27,6 @@ interface Props {
 
 /* ── KPI helpers ─────────────────────────────────────────────────────────── */
 
-/** Clicks recorded today (UTC day) */
 function clicksToday(data: AnalyticsSummary): number {
   const todayPrefix = new Date().toISOString().slice(0, 10);
   return data.clicks_over_time
@@ -29,7 +34,6 @@ function clicksToday(data: AnalyticsSummary): number {
     .reduce((s, b) => s + b.total_clicks, 0);
 }
 
-/** Clicks recorded yesterday (UTC day) */
 function clicksYesterday(data: AnalyticsSummary): number {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - 1);
@@ -39,13 +43,12 @@ function clicksYesterday(data: AnalyticsSummary): number {
     .reduce((s, b) => s + b.total_clicks, 0);
 }
 
-/** Growth % (today vs yesterday). Returns null when there's no yesterday data. */
 function growthPct(today: number, yesterday: number): number | null {
   if (yesterday === 0) return today > 0 ? 100 : null;
   return Math.round(((today - yesterday) / yesterday) * 100);
 }
 
-/* ── Icons (inline SVG — no icon lib) ────────────────────────────────────── */
+/* ── Icons ────────────────────────────────────────────────────────────────── */
 
 const IconClicks = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -74,6 +77,18 @@ const IconGrowth = () => (
     <polyline points="17 6 23 6 23 12" />
   </svg>
 );
+
+/* ── Section divider ──────────────────────────────────────────────────────── */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 mt-1">
+      <span className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest whitespace-nowrap">
+        {children}
+      </span>
+      <div className="flex-1 h-px bg-[var(--border-default)]" />
+    </div>
+  );
+}
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 
@@ -112,11 +127,7 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleGranularityChange(g: AnalyticsGranularity) {
-    setGranularity(g);
-  }
-
-  /* ─── Derived KPI values ─── */
+  /* KPI values */
   const today = data ? clicksToday(data) : 0;
   const yesterday = data ? clicksYesterday(data) : 0;
   const growth = data ? growthPct(today, yesterday) : null;
@@ -129,13 +140,14 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">Analytics</h2>
             {data?.cached && (
-              <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 font-medium">cached</span>
+              <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-500 font-medium">
+                cached
+              </span>
             )}
           </div>
           <p className="text-xs text-[var(--text-muted)] truncate mt-0.5">{link.long_url}</p>
         </div>
 
-        {/* Header actions */}
         <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
           {/* Copy link */}
           <button
@@ -149,12 +161,17 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
           >
             {copied ? (
               <>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="2 6 5 9 10 3" /></svg>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="2 6 5 9 10 3" />
+                </svg>
                 Copied
               </>
             ) : (
               <>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
                 Copy
               </>
             )}
@@ -167,7 +184,8 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
             aria-label="Close analytics"
           >
             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="2" y1="2" x2="10" y2="10" /><line x1="10" y1="2" x2="2" y2="10" />
+              <line x1="2" y1="2" x2="10" y2="10" />
+              <line x1="10" y1="2" x2="2" y2="10" />
             </svg>
           </button>
         </div>
@@ -175,7 +193,6 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
 
       {/* ── Body ── */}
       <div className="p-5">
-        {/* Loading skeleton */}
         {loading && <AnalyticsSkeleton />}
 
         {/* Error state */}
@@ -187,7 +204,9 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
           >
             <div className="w-12 h-12 rounded-2xl bg-rose-500/10 flex items-center justify-center mx-auto mb-3">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-500">
-                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
             </div>
             <p className="text-sm font-medium text-[var(--text-primary)]">Failed to load</p>
@@ -203,74 +222,67 @@ export default function AnalyticsPanel({ link, onClose }: Props) {
 
         {/* Data loaded */}
         {!loading && !error && data && (
-          <div className="space-y-5">
+          <div className="space-y-6">
 
             {/* ── 1. KPI Row ── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <StatCard
-                label="Total Clicks"
-                value={data.total_clicks}
-                icon={<IconClicks />}
-                color="blue"
-                delay={0}
-              />
-              <StatCard
-                label="Unique Visitors"
-                value={data.unique_clicks}
-                icon={<IconUnique />}
-                color="violet"
-                delay={0.07}
-              />
-              <StatCard
-                label="Clicks Today"
-                value={today}
-                icon={<IconToday />}
-                color="cyan"
-                delay={0.14}
-              />
+              <StatCard label="Total Clicks" value={data.total_clicks} icon={<IconClicks />} color="blue" delay={0} />
+              <StatCard label="Unique Visitors" value={data.unique_clicks} icon={<IconUnique />} color="violet" delay={0.07} />
+              <StatCard label="Clicks Today" value={today} icon={<IconToday />} color="cyan" delay={0.14} />
               <StatCard
                 label="vs Yesterday"
                 value={growth !== null ? `${growth > 0 ? "+" : ""}${growth}%` : "—"}
                 icon={<IconGrowth />}
                 color={growth !== null && growth >= 0 ? "emerald" : "rose"}
-                trend={
-                  growth !== null
-                    ? { value: growth, label: `${yesterday} clicks yesterday` }
-                    : null
-                }
+                trend={growth !== null ? { value: growth, label: `${yesterday} clicks yesterday` } : null}
                 delay={0.21}
               />
             </div>
 
-            {/* ── Empty state (no clicks at all) ── */}
-            {data.total_clicks === 0 && (
-              <EmptyState shortCode={link.short_code} />
-            )}
+            {/* ── Empty state ── */}
+            {data.total_clicks === 0 && <EmptyState shortCode={link.short_code} />}
 
-            {/* ── Content shown only when there are clicks ── */}
+            {/* ── Content (only when there are clicks) ── */}
             {data.total_clicks > 0 && (
               <>
-                {/* ── 2. Time-series chart ── */}
-                <ChartContainer
+                {/* ── Section: Traffic Over Time ── */}
+                <SectionLabel>Traffic Over Time</SectionLabel>
+
+                {/* Click Trend (upgraded line chart) */}
+                <LineTrendChart
                   data={data}
                   granularity={granularity}
-                  onGranularityChange={handleGranularityChange}
+                  onGranularityChange={setGranularity}
                 />
 
-                {/* ── 3. Geo + Devices row ── */}
+                {/* Hourly Activity + Click Velocity */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                  <GeoList countries={data.top_countries} />
-                  <DeviceBreakdown
-                    devices={data.device_breakdown}
-                    browsers={data.browser_breakdown}
-                  />
+                  <HourlyBarChart data={data} />
+                  <ClickVelocityChart data={data} />
                 </div>
 
-                {/* ── 4. Referrers + Live Activity row ── */}
+                {/* ── Section: Audience ── */}
+                <SectionLabel>Audience</SectionLabel>
+
+                {/* Device Pie + Referrer Pie */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                  <ReferrerList referrers={data.top_referrers} />
-                  <LiveActivity linkId={link.id} initialClicks={data.recent_clicks} />
+                  <DevicePieChart devices={data.device_breakdown} />
+                  <ReferrerPieChart referrers={data.top_referrers} />
                 </div>
+
+                {/* ── Section: Geography & Browsers ── */}
+                <SectionLabel>Geography &amp; Technology</SectionLabel>
+
+                {/* Country Bar + Browser Bar */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                  <CountryBarChart countries={data.top_countries} />
+                  <BrowserBarChart browsers={data.browser_breakdown} />
+                </div>
+
+                {/* ── Section: Recent Activity ── */}
+                <SectionLabel>Recent Activity</SectionLabel>
+
+                <LiveActivity linkId={link.id} initialClicks={data.recent_clicks} />
               </>
             )}
           </div>
