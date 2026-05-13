@@ -1,14 +1,39 @@
-import { signIn } from "@/app/auth/actions";
+"use client";
+
+import { useState, Suspense } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export const metadata = { title: "Sign In" };
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
+  const message = searchParams.get("message");
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; message?: string }>;
-}) {
-  const { error, message } = await searchParams;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(urlError ?? "");
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const formData = new FormData(e.currentTarget);
+    const result = await signIn("credentials", {
+      email: formData.get("email") as string,
+      password: formData.get("password") as string,
+      redirect: false,
+    });
+
+    setLoading(false);
+
+    if (result?.ok) {
+      router.push("/dashboard");
+    } else {
+      setError("Invalid email or password.");
+    }
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg-base)] px-4">
@@ -22,7 +47,7 @@ export default async function LoginPage({
             </svg>
           </div>
           <h1 className="text-xl font-bold text-[var(--text-primary)]">Sign in to LinkShrink</h1>
-          <p className="text-sm text-[var(--text-muted)]">Unlock custom aliases & analytics</p>
+          <p className="text-sm text-[var(--text-muted)]">Unlock custom aliases &amp; analytics</p>
         </div>
 
         {/* Feedback messages */}
@@ -38,7 +63,7 @@ export default async function LoginPage({
         )}
 
         {/* Form */}
-        <form action={signIn} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-[var(--text-secondary)]" htmlFor="email">Email</label>
             <input
@@ -65,9 +90,10 @@ export default async function LoginPage({
           </div>
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold shadow-lg shadow-blue-500/25 hover:brightness-110 active:brightness-95 transition-all duration-200"
+            disabled={loading}
+            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-violet-600 text-white text-sm font-semibold shadow-lg shadow-blue-500/25 hover:brightness-110 active:brightness-95 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200"
           >
-            Sign In
+            {loading ? "Signing in…" : "Sign In"}
           </button>
         </form>
 
@@ -78,5 +104,13 @@ export default async function LoginPage({
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
 }

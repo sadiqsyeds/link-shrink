@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import Providers from "@/components/Providers";
 import "./globals.css";
 
 /* ─── Fonts ──────────────────────────────────────────────────────────────── */
@@ -84,12 +85,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      {/*
-        suppressHydrationWarning is required because ThemeToggle adds/removes
-        the "dark" / "light" class on <html> client-side.
-        The inline script below runs synchronously before first paint to avoid
-        a flash of the wrong theme (FOUC).
-      */}
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -115,7 +110,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

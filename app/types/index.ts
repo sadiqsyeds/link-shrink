@@ -1,11 +1,6 @@
-/**
- * app/types/index.ts
- * Shared TypeScript types for the LinkShrink application.
- */
-
-/** Shape of a row in the "links" table */
+/** Shape of a row in the "links" collection */
 export interface LinkRow {
-  id: string;           // uuid
+  id: string;
   long_url: string;
   short_code: string;
   custom_alias?: string | null;
@@ -18,13 +13,13 @@ export interface LinkRow {
 export interface ShortenResponse {
   id: string;
   longUrl: string;
-  shortUrl: string;       // the short code
-  fullShortUrl: string;   // the full URL
+  shortUrl: string;
+  fullShortUrl: string;
 }
 
 /** Click analytics row */
 export interface ClickRow {
-  id: number;
+  id: string;
   link_id: string;
   timestamp: string;
   country: string | null;
@@ -60,7 +55,6 @@ export type ReferrerCategory = "search" | "social" | "direct" | "other";
 export interface AnalyticsSummary {
   total_clicks: number;
   unique_clicks: number;
-  /** Time-series buckets; key is ISO date string (day) or ISO hour string */
   clicks_over_time: { bucket: string; total_clicks: number; unique_clicks: number }[];
   granularity: AnalyticsGranularity;
   top_countries: { country: string; clicks: number }[];
@@ -68,6 +62,5 @@ export interface AnalyticsSummary {
   device_breakdown: { device: string; clicks: number }[];
   browser_breakdown: { browser: string; clicks: number }[];
   recent_clicks: ClickRow[];
-  /** Served from cache if true */
   cached?: boolean;
 }

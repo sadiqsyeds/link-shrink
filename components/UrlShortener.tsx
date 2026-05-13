@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, type FormEvent } from "react";
+import { useState, useRef, type FormEvent } from "react";
+import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@/utils/supabase/client";
 import ResultCard from "./ResultCard";
 import { saveToRecent } from "./RecentLinks";
 import type { ShortenResponse } from "@/app/types";
@@ -10,23 +10,15 @@ import type { ShortenResponse } from "@/app/types";
 type Status = "idle" | "loading" | "success" | "error";
 
 export default function UrlShortener() {
+  const { data: session } = useSession();
+  const isAuthed = !!session?.user;
+
   const [url, setUrl] = useState("");
   const [alias, setAlias] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<ShortenResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
-  const [isAuthed, setIsAuthed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Check auth state to conditionally show alias field
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => setIsAuthed(!!data.user));
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
-      setIsAuthed(!!session?.user);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();

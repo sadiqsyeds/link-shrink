@@ -1,52 +1,28 @@
-/**
- * app/api/analytics/[linkId]/route.ts
- *
- * GET /api/analytics/:linkId — Returns aggregated analytics for a link.
- *
- * Improvements over v1:
- *  - Reads from materialized views (country_stats, device_stats, referrer_stats,
- *    daily_click_stats, hourly_click_stats) instead of scanning raw clicks rows.
- *  - Supports ?granularity=hour|day time-series param.
- *  - Classifies referrers into categories (search / social / direct / other).
- *  - Per-invocation in-memory cache (TTL 60s) — serverless-safe.
- *  - Only 4 DB round-trips instead of 8.
- *
- * Constraints:
- *  - Vercel free tier (serverless, no persistent memory, no external cache)
- *  - Supabase PostgreSQL only
- *  - Does NOT modify existing tables
- */
-
 import { NextResponse, type NextRequest } from "next/server";
-import { cookies } from "next/headers";
-import { createClient as createServerClient } from "@/utils/supabase/server";
-import { supabase } from "@/lib/db";
+import { getServerSession } from "next-auth";
+import { ObjectId } from "mongodb";
+import { authOptions } from "@/lib/auth";
+import { getLinksCollection, getClicksCollection } from "@/lib/db";
 import type { AnalyticsSummary, AnalyticsGranularity, ReferrerCategory } from "@/app/types";
 
-/* ── In-process cache (survives within a single warm Lambda, resets on cold start) ── */
-interface CacheEntry {
-  data: AnalyticsSummary;
-  expiresAt: number;
-}
-
+/* ── In-process cache ─────────────────────────────────────────────── */
+interface CacheEntry { data: AnalyticsSummary; expiresAt: number; }
 const _g = globalThis as unknown as { _analyticsCache?: Map<string, CacheEntry> };
 if (!_g._analyticsCache) _g._analyticsCache = new Map();
-const cache = _g._analyticsCache;
-
-const CACHE_TTL_MS = 60_000; // 60 seconds
+const analyticsCache = _g._analyticsCache;
+const CACHE_TTL_MS = 60_000;
 
 function getCached(key: string): AnalyticsSummary | null {
-  const entry = cache.get(key);
+  const entry = analyticsCache.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { cache.delete(key); return null; }
+  if (Date.now() > entry.expiresAt) { analyticsCache.delete(key); return null; }
   return entry.data;
 }
-
 function setCached(key: string, data: AnalyticsSummary): void {
-  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+  analyticsCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
 }
 
-/* ── Referrer categorization ────────────────────────────────────────────────── */
+/* ── Referrer categorization ─────────────────────────────────────── */
 const SEARCH_ENGINES = ["google", "bing", "yahoo", "duckduckgo", "baidu", "yandex", "ecosia"];
 const SOCIAL_NETWORKS = ["twitter", "x.com", "linkedin", "facebook", "instagram", "tiktok", "reddit", "youtube", "whatsapp", "telegram", "pinterest"];
 
@@ -58,7 +34,7 @@ function categorizeReferrer(referrer: string | null): ReferrerCategory {
   return "other";
 }
 
-/* ── Main handler ────────────────────────────────────────────────────────────── */
+/* ── Main handler ────────────────────────────────────────────────── */
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ linkId: string }> }
@@ -69,159 +45,171 @@ export async function GET(
     return NextResponse.json({ error: "linkId is required." }, { status: 400 });
   }
 
-  // Parse ?granularity=hour|day (default: day)
   const granularity: AnalyticsGranularity =
     req.nextUrl.searchParams.get("granularity") === "hour" ? "hour" : "day";
 
-  // ── Auth check ──
-  let userId: string | null = null;
-  try {
-    const cookieStore = await cookies();
-    const authClient = createServerClient(cookieStore);
-    const { data: { user } } = await authClient.auth.getUser();
-    userId = user?.id ?? null;
-  } catch {
-    // not authenticated
-  }
-
-  if (!userId) {
+  // Auth check
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  // ── Cache check ──
   const cacheKey = `${linkId}:${granularity}`;
   const cached = getCached(cacheKey);
   if (cached) {
     return NextResponse.json({ ...cached, cached: true }, { status: 200 });
   }
 
-  // ── Verify link ownership (single query) ──
-  const { data: link, error: linkErr } = await supabase
-    .from("links")
-    .select("id, user_id, short_code, long_url, click_count, created_at")
-    .eq("id", linkId)
-    .maybeSingle();
-
-  if (linkErr || !link) {
+  // Validate linkId
+  let objectId: ObjectId;
+  try {
+    objectId = new ObjectId(linkId);
+  } catch {
     return NextResponse.json({ error: "Link not found." }, { status: 404 });
   }
 
-  if (link.user_id !== userId) {
+  const linksCollection = await getLinksCollection();
+  const link = await linksCollection.findOne({ _id: objectId });
+
+  if (!link) {
+    return NextResponse.json({ error: "Link not found." }, { status: 404 });
+  }
+
+  if (link.user_id !== session.user.id) {
     return NextResponse.json({ error: "Access denied." }, { status: 403 });
   }
 
-  // ── Run 4 parallel queries on aggregated views ──
-  const [timeSeriesResult, dimensionsResult, recentResult] = await Promise.all([
+  const clicksCollection = await getClicksCollection();
 
-    // ① Time-series from materialized view (daily or hourly)
-    granularity === "hour"
-      ? supabase
-          .from("hourly_click_stats")
-          .select("hour, total_clicks, unique_clicks")
-          .eq("link_id", linkId)
-          .gte("hour", new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()) // last 48h
-          .order("hour", { ascending: true })
-      : supabase
-          .from("daily_click_stats")
-          .select("day, total_clicks, unique_clicks")
-          .eq("link_id", linkId)
-          .gte("day", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // last 30 days
-          .order("day", { ascending: true }),
+  // Run aggregations in parallel
+  const now = Date.now();
+  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
+  const fortyEightHoursAgo = new Date(now - 48 * 60 * 60 * 1000);
 
-    // ② Country + device + referrer from their materialized views (3 sub-queries in one Promise.all)
-    Promise.all([
-      supabase
-        .from("country_stats")
-        .select("country, clicks")
-        .eq("link_id", linkId)
-        .order("clicks", { ascending: false })
-        .limit(10),
+  const [timeSeriesData, countriesData, devicesData, referrersData, browsersData, recentData] =
+    await Promise.all([
+      // Time-series
+      clicksCollection
+        .aggregate([
+          {
+            $match: {
+              link_id: linkId,
+              timestamp: { $gte: granularity === "hour" ? fortyEightHoursAgo : thirtyDaysAgo },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                $dateToString: {
+                  format: granularity === "hour" ? "%Y-%m-%dT%H:00:00.000Z" : "%Y-%m-%d",
+                  date: "$timestamp",
+                },
+              },
+              total_clicks: { $sum: 1 },
+              unique_clicks: { $sum: { $cond: ["$is_unique", 1, 0] } },
+            },
+          },
+          { $sort: { _id: 1 } },
+        ])
+        .toArray(),
 
-      supabase
-        .from("device_stats")
-        .select("device, clicks")
-        .eq("link_id", linkId)
-        .order("clicks", { ascending: false })
-        .limit(10),
+      // Countries
+      clicksCollection
+        .aggregate([
+          { $match: { link_id: linkId } },
+          { $group: { _id: "$country", clicks: { $sum: 1 } } },
+          { $sort: { clicks: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray(),
 
-      supabase
-        .from("referrer_stats")
-        .select("referrer, clicks")
-        .eq("link_id", linkId)
-        .order("clicks", { ascending: false })
-        .limit(10),
+      // Devices
+      clicksCollection
+        .aggregate([
+          { $match: { link_id: linkId } },
+          { $group: { _id: "$device", clicks: { $sum: 1 } } },
+          { $sort: { clicks: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray(),
 
-      supabase
-        .from("clicks")
-        .select("browser")
-        .eq("link_id", linkId)
-        .not("browser", "is", null),
-    ]),
+      // Referrers
+      clicksCollection
+        .aggregate([
+          { $match: { link_id: linkId } },
+          { $group: { _id: "$referrer", clicks: { $sum: 1 } } },
+          { $sort: { clicks: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray(),
 
-    // ③ Recent 10 raw clicks (small, bounded query)
-    supabase
-      .from("clicks")
-      .select("*")
-      .eq("link_id", linkId)
-      .order("created_at", { ascending: false })
-      .limit(10),
-  ]);
+      // Browsers
+      clicksCollection
+        .aggregate([
+          { $match: { link_id: linkId } },
+          { $group: { _id: "$browser", clicks: { $sum: 1 } } },
+          { $sort: { clicks: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray(),
 
-  const [countriesResult, devicesResult, referrersResult, browsersResult] = dimensionsResult;
+      // Recent clicks
+      clicksCollection
+        .find({ link_id: linkId })
+        .sort({ created_at: -1 })
+        .limit(10)
+        .toArray(),
+    ]);
 
-  // ── Build time-series buckets ──
-  const clicks_over_time = (timeSeriesResult.data ?? []).map((row) => ({
-    bucket: granularity === "hour"
-      ? (row as { hour: string }).hour
-      : (row as { day: string }).day,
-    total_clicks: Number((row as { total_clicks: number }).total_clicks),
-    unique_clicks: Number((row as { unique_clicks: number }).unique_clicks),
+  const clicks_over_time = timeSeriesData.map((row) => ({
+    bucket: row._id as string,
+    total_clicks: Number(row.total_clicks),
+    unique_clicks: Number(row.unique_clicks),
   }));
 
-  // ── Aggregate totals from time-series (avoids extra COUNT query) ──
-  const total_clicks = link.click_count ?? clicks_over_time.reduce((s, r) => s + r.total_clicks, 0);
+  const total_clicks = (link.click_count as number) ?? clicks_over_time.reduce((s, r) => s + r.total_clicks, 0);
   const unique_clicks = clicks_over_time.reduce((s, r) => s + r.unique_clicks, 0);
 
-  // ── Browser breakdown (still from raw — no browser_stats view yet) ──
-  const browserMap = new Map<string, number>();
-  for (const row of browsersResult.data ?? []) {
-    const b = (row.browser as string) || "Unknown";
-    browserMap.set(b, (browserMap.get(b) ?? 0) + 1);
-  }
-  const browser_breakdown = Array.from(browserMap.entries())
-    .map(([browser, clicks]) => ({ browser, clicks }))
-    .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 10);
-
-  // ── Referrers with category classification ──
-  const top_referrers = (referrersResult.data ?? []).map((row) => ({
-    referrer: (row.referrer as string) || "direct",
-    clicks: Number(row.clicks),
-    category: categorizeReferrer(row.referrer as string | null),
-  }));
-
-  // ── Build summary ──
   const summary: AnalyticsSummary = {
     total_clicks,
     unique_clicks,
     clicks_over_time,
     granularity,
-    top_countries: (countriesResult.data ?? []).map((r) => ({
-      country: (r.country as string) || "Unknown",
+    top_countries: countriesData.map((r) => ({
+      country: (r._id as string) || "Unknown",
       clicks: Number(r.clicks),
     })),
-    top_referrers,
-    device_breakdown: (devicesResult.data ?? []).map((r) => ({
-      device: (r.device as string) || "Unknown",
+    top_referrers: referrersData.map((r) => ({
+      referrer: (r._id as string) || "direct",
+      clicks: Number(r.clicks),
+      category: categorizeReferrer(r._id as string | null),
+    })),
+    device_breakdown: devicesData.map((r) => ({
+      device: (r._id as string) || "Unknown",
       clicks: Number(r.clicks),
     })),
-    browser_breakdown,
-    recent_clicks: recentResult.data ?? [],
+    browser_breakdown: browsersData.map((r) => ({
+      browser: (r._id as string) || "Unknown",
+      clicks: Number(r.clicks),
+    })),
+    recent_clicks: recentData.map((r) => ({
+      id: r._id.toString(),
+      link_id: r.link_id as string,
+      timestamp: (r.timestamp as Date).toISOString(),
+      country: r.country as string | null,
+      city: r.city as string | null,
+      device: r.device as string | null,
+      browser: r.browser as string | null,
+      os: r.os as string | null,
+      referrer: r.referrer as string | null,
+      is_unique: r.is_unique as boolean,
+      visitor_hash: r.visitor_hash as string | null,
+      ip_hash: r.ip_hash as string | null,
+      created_at: (r.created_at as Date).toISOString(),
+    })),
     cached: false,
   };
 
-  // ── Store in cache ──
   setCached(cacheKey, summary);
-
   return NextResponse.json(summary, { status: 200 });
 }

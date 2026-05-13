@@ -1,7 +1,7 @@
-import { cookies } from "next/headers";
+import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
-import { supabase } from "@/lib/db";
+import { authOptions } from "@/lib/auth";
+import { getLinksCollection } from "@/lib/db";
 import Link from "next/link";
 import DashboardClient from "./DashboardClient";
 import SignOutButton from "./SignOutButton";
@@ -11,20 +11,25 @@ import type { LinkRow } from "@/app/types";
 export const metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
-  // ── Auth guard ──
-  const cookieStore = await cookies();
-  const authClient = createClient(cookieStore);
-  const { data: { user } } = await authClient.auth.getUser();
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) redirect("/auth/login");
 
-  if (!user) redirect("/auth/login");
+  const links = await getLinksCollection();
+  const rows = await links
+    .find({ user_id: session.user.id })
+    .sort({ created_at: -1 })
+    .limit(50)
+    .toArray();
 
-  // ── Fetch user's links ──
-  const { data: links } = await supabase
-    .from("links")
-    .select("id, short_code, custom_alias, long_url, click_count, created_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const linkRows: LinkRow[] = rows.map((r) => ({
+    id: r._id.toString(),
+    long_url: r.long_url as string,
+    short_code: r.short_code as string,
+    custom_alias: (r.custom_alias as string | null) ?? null,
+    user_id: r.user_id as string | null,
+    click_count: (r.click_count as number) ?? 0,
+    created_at: (r.created_at as Date).toISOString(),
+  }));
 
   return (
     <div className="min-h-screen bg-[var(--bg-base)]">
@@ -42,7 +47,7 @@ export default async function DashboardPage() {
               <span className="text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">LinkShrink</span>
             </Link>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-muted)] hidden sm:block">{user.email}</span>
+              <span className="text-xs text-[var(--text-muted)] hidden sm:block">{session.user.email}</span>
               <ThemeToggle />
               <SignOutButton />
             </div>
@@ -56,8 +61,7 @@ export default async function DashboardPage() {
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Dashboard</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">Manage your links and view analytics.</p>
         </div>
-
-        <DashboardClient links={(links ?? []) as LinkRow[]} />
+        <DashboardClient links={linkRows} />
       </main>
     </div>
   );

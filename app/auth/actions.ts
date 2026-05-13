@@ -1,44 +1,36 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { createClient } from "@/utils/supabase/server";
+import { hash } from "bcryptjs";
+import { getUsersCollection } from "@/lib/db";
 
 export async function signUp(formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const email = ((formData.get("email") as string) ?? "").toLowerCase().trim();
+  const password = (formData.get("password") as string) ?? "";
 
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-
-  const { error } = await supabase.auth.signUp({ email, password });
-
-  if (error) {
-    redirect(`/auth/signup?error=${encodeURIComponent(error.message)}`);
+  if (!email || !password) {
+    redirect(`/auth/signup?error=${encodeURIComponent("Email and password are required.")}`);
   }
 
-  redirect("/auth/login?message=Check your email to confirm your account.");
-}
-
-export async function signIn(formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-  if (error) {
-    redirect(`/auth/login?error=${encodeURIComponent(error.message)}`);
+  if (password.length < 8) {
+    redirect(`/auth/signup?error=${encodeURIComponent("Password must be at least 8 characters.")}`);
   }
 
-  redirect("/dashboard");
-}
+  try {
+    const users = await getUsersCollection();
+    const existing = await users.findOne({ email });
 
-export async function signOut() {
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-  await supabase.auth.signOut();
-  redirect("/");
+    if (existing) {
+      redirect(`/auth/signup?error=${encodeURIComponent("An account with this email already exists.")}`);
+    }
+
+    const hashedPassword = await hash(password, 10);
+    await users.insertOne({ email, password: hashedPassword, created_at: new Date() });
+  } catch (err) {
+    if ((err as { digest?: string }).digest?.startsWith("NEXT_REDIRECT")) throw err;
+    console.error("[signUp] error:", err);
+    redirect(`/auth/signup?error=${encodeURIComponent("Failed to create account. Please try again.")}`);
+  }
+
+  redirect("/auth/login?message=Account created! You can now sign in.");
 }

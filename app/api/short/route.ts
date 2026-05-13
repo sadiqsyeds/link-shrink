@@ -1,22 +1,14 @@
-/**
- * app/api/short/route.ts
- *
- * POST /api/short  — Shorten a long URL (supports custom alias for auth'd users)
- * GET  /api/short  — Returns 405
- */
-
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { getServerSession } from "next-auth";
 import { nanoid } from "nanoid";
-import { createClient as createServerClient } from "@/utils/supabase/server";
-import { supabase, dbErrorMessage } from "@/lib/db";
+import { authOptions } from "@/lib/auth";
+import { getLinksCollection, dbErrorMessage } from "@/lib/db";
 import { isValidUrl, normaliseUrl, buildShortUrl } from "@/lib/utils";
 import type { ShortenResponse } from "@/app/types";
 
 const ALIAS_RE = /^[a-zA-Z0-9_-]{3,32}$/;
 
 export async function POST(req: Request): Promise<NextResponse> {
-  // 1. Parse request body
   let body: unknown;
   try {
     body = await req.json();
@@ -28,7 +20,6 @@ export async function POST(req: Request): Promise<NextResponse> {
   const rawUrl = raw.longUrl;
   const customAlias = typeof raw.customAlias === "string" ? raw.customAlias.trim() : null;
 
-  // 2. Validate URL
   if (!isValidUrl(rawUrl)) {
     return NextResponse.json(
       { error: "A valid http:// or https:// URL is required." },
@@ -38,24 +29,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const longUrl = normaliseUrl(rawUrl as string);
 
-  // 3. Check auth session (optional — anon users still allowed)
   let userId: string | null = null;
   try {
-    const cookieStore = await cookies();
-    const authClient = createServerClient(cookieStore);
-    const { data: { user } } = await authClient.auth.getUser();
-    userId = user?.id ?? null;
+    const session = await getServerSession(authOptions);
+    userId = session?.user?.id ?? null;
   } catch {
-    // auth check failed — treat as anon
+    // treat as anon
   }
 
-  // 4. Validate custom alias (only for authenticated users)
   if (customAlias) {
     if (!userId) {
-      return NextResponse.json(
-        { error: "Sign in to use a custom alias." },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Sign in to use a custom alias." }, { status: 401 });
     }
     if (!ALIAS_RE.test(customAlias)) {
       return NextResponse.json(
@@ -63,7 +47,6 @@ export async function POST(req: Request): Promise<NextResponse> {
         { status: 400 }
       );
     }
-    // Reserved paths
     const reserved = ["api", "auth", "dashboard", "login", "signup", "logout"];
     if (reserved.includes(customAlias.toLowerCase())) {
       return NextResponse.json({ error: "That alias is reserved." }, { status: 400 });
@@ -71,36 +54,25 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    // 5. Deduplication — if no custom alias and URL already shortened, return it
-    if (!customAlias) {
-      const { data: existing } = await supabase
-        .from("links")
-        .select("id, short_code")
-        .eq("long_url", longUrl)
-        .is("custom_alias", null)
-        .limit(1)
-        .maybeSingle();
+    const links = await getLinksCollection();
 
+    if (!customAlias) {
+      const existing = await links.findOne({ long_url: longUrl, custom_alias: null });
       if (existing) {
         const response: ShortenResponse = {
-          id: existing.id,
+          id: existing._id.toString(),
           longUrl,
-          shortUrl: existing.short_code,
-          fullShortUrl: buildShortUrl(existing.short_code),
+          shortUrl: existing.short_code as string,
+          fullShortUrl: buildShortUrl(existing.short_code as string),
         };
         return NextResponse.json(response, { status: 200 });
       }
     }
 
-    // 6. Validate custom alias uniqueness
     if (customAlias) {
-      const { data: aliasExists } = await supabase
-        .from("links")
-        .select("id")
-        .or(`short_code.eq.${customAlias},custom_alias.eq.${customAlias}`)
-        .limit(1)
-        .maybeSingle();
-
+      const aliasExists = await links.findOne({
+        $or: [{ short_code: customAlias }, { custom_alias: customAlias }],
+      });
       if (aliasExists) {
         return NextResponse.json(
           { error: "That custom alias is already taken. Try another." },
@@ -109,35 +81,23 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
     }
 
-    // 7. Generate short code & insert
     const shortCode = customAlias ?? nanoid(8);
-
-    const insertData: Record<string, unknown> = {
+    const doc: Record<string, unknown> = {
       long_url: longUrl,
       short_code: shortCode,
+      custom_alias: customAlias ?? null,
+      user_id: userId,
+      click_count: 0,
+      created_at: new Date(),
     };
-    if (customAlias) insertData.custom_alias = customAlias;
-    if (userId) insertData.user_id = userId;
 
-    const { data: inserted, error: insertError } = await supabase
-      .from("links")
-      .insert(insertData)
-      .select("id, short_code")
-      .single();
-
-    if (insertError || !inserted) {
-      console.error("[POST /api/short] insert error:", insertError);
-      return NextResponse.json(
-        { error: dbErrorMessage(insertError) },
-        { status: 500 }
-      );
-    }
+    const result = await links.insertOne(doc);
 
     const response: ShortenResponse = {
-      id: inserted.id,
+      id: result.insertedId.toString(),
       longUrl,
-      shortUrl: inserted.short_code,
-      fullShortUrl: buildShortUrl(inserted.short_code),
+      shortUrl: shortCode,
+      fullShortUrl: buildShortUrl(shortCode),
     };
     return NextResponse.json(response, { status: 201 });
   } catch (err) {

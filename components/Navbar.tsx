@@ -1,27 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import ThemeToggle from "./ThemeToggle";
 import Link from "next/link";
-import { createClient } from "@/utils/supabase/client";
 
 export default function Navbar() {
-  const [email, setEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? null);
-      setLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
-      setEmail(session?.user?.email ?? null);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
+  const { data: session, status } = useSession();
+  const loading = status === "loading";
 
   return (
     <motion.header
@@ -59,8 +45,7 @@ export default function Navbar() {
             <ThemeToggle />
 
             {!loading && (
-              email ? (
-                /* Authenticated */
+              session?.user ? (
                 <Link
                   href="/dashboard"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-blue-500 to-violet-600 text-white shadow-md shadow-blue-500/25 hover:brightness-110 transition-all duration-200"
@@ -74,7 +59,6 @@ export default function Navbar() {
                   Dashboard
                 </Link>
               ) : (
-                /* Unauthenticated */
                 <Link
                   href="/auth/login"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--bg-raised)] text-[var(--text-primary)] hover:bg-blue-500 hover:text-white transition-all duration-200"
